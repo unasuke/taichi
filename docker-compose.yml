@@ -2,9 +2,13 @@ version: '3'
 services:
   neo4j:
     image: neo4j:3.3.3
+    environment:
+      NEO4J_AUTH: none
     ports:
       - '7474:7474'
   app:
     build: .
+    volumes:
+      - .:/app
     links:
       - neo4j
