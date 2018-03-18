@@ -47,7 +47,7 @@ class Client
   def start
     param = "word=しりとり&level=#{@level}&user_objective_word=#{@dic.poem[0]['word']}&bot_objective_word=#{@dic.poem[1]['word']}"
     @logger.info "post /start_shiritori with param: #{param}"
-    response = JSON.parse(@client.post('/start_shiritori', param).body, symbolize_names: true)
+    response = JSON.parse(@client.post('/start_shiritori', param).body, symbolize_names: true, encoding: 'UTF-8')
 
     if response[:status] == 'error'
       raise ShiritoriError, response[:message]
@@ -62,13 +62,19 @@ class Client
   def turn(play_id: nil)
     @play_id = play_id if play_id
     word = @dic.next_word(start: @current_word, goal: @current_target)
+    ignored = []
     if @bot_objective_word_registered && word == @current_target
-      word = @dic.next_word(start: @current_word, goal: @dic.detect_target(ignore: @current_word))
+      ignored << @dic.detect_target(ignore: @current_word)
+      word = @dic.next_word(start: @current_word, goal: ignored[-1])
+      while word.nil?
+        ignored << @dic.detect_target(ignore: ignored)
+        word = @dic.next_word(start: @current_word, goal: ignored[-1])
+      end
     end
     @dic.remove_word(word: @current_word)
     param = "play_id=#{@play_id}&word=#{word}"
     @logger.info "post /shiritori with param: #{param}"
-    response = JSON.parse(@client.post('/shiritori', param).body, symbolize_names: true)
+    response = JSON.parse(@client.post('/shiritori', param).body, symbolize_names: true, encoding: 'UTF-8')
     @logger.info "response: #{response}"
     @current_word = response[:word]
 
@@ -126,7 +132,7 @@ class Dictionary
     @end_poem_node = nil
     @neo4j = Neography::Rest.new
     @logger = Logger.new(STDOUT)
-    @logger.level = Logger::INFO
+    @logger.level = Logger::DEBUG
     build_index
   end
 
@@ -145,7 +151,7 @@ class Dictionary
       @head[word['phonetic'][0]] << h
       @tail[word['phonetic'][-1]] << h
     end
-    
+
     if @poem_id
       poem.each do |word|
         next if word['kind'] == '下の句' # 下の句は初回登録しない
@@ -171,7 +177,7 @@ class Dictionary
     return unless @tail[word['phonetic'][0]]
     @tail[word['phonetic'][0]].each do |target|
       target['node'].outgoing(:shiritori) << word['node']
-      @logger.debug "set relationship #{target['word']} -> #{word['word']}"
+      #@logger.debug "set relationship #{target['word']} -> #{word['word']}"
     end
   end
 
@@ -205,7 +211,19 @@ class Dictionary
     return start if start == goal
     start_node = Neography::Node.load(@neo4j.execute_query("MATCH (n{word: '#{start}'}) RETURN id(n);")['data'][0][0])
     goal_node = Neography::Node.load(@neo4j.execute_query("MATCH (n{word: '#{goal}'}) RETURN id(n);")['data'][0][0])
-    start_node.shortest_path_to(goal_node).outgoing(:shiritori).depth(:all).nodes.first.map {|n| n.word}[1]
+    #binding.pry
+    paths = start_node.shortest_path_to(goal_node).outgoing(:shiritori).depth(:all).nodes.first
+    if paths.size < 10
+      paths[1]['word']
+    else
+      start_node.all_paths_to(goal_node).outgoing(:shiritori).depth(10).nodes.select do |n|
+        n.size.even?
+      end.sort do |a, b|
+        a.size <=> b.size
+      end.first[1]['word']
+    end
+  rescue
+    nil
   end
 
   def remove_word(word: nil)
@@ -215,9 +233,8 @@ class Dictionary
   end
 
   def detect_target(ignore: nil)
-    @logger.debug 'detect target'
-    @logger.debug "#{@tail[poem[1]['phonetic'][0]].inspect}"
-    @tail[poem[1]['phonetic'][0]].find_all {|n| n['word'] != poem[1]['word'] && n['word'] != ignore }.sample['word']
+    @logger.debug "detect target, ignore #{ignore}"
+    @tail[poem[1]['phonetic'][0]].find_all {|n| n['word'] != poem[1]['word'] && !ignore.include?(n['word']) }[0]['word']
   end
 
   def aboid_call_shimonoku_by_me
