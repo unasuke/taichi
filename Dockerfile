@@ -7,4 +7,4 @@ ENV LC_CTYPE ja_JP.UTF-8
 RUN localedef -f UTF-8 -i ja_JP ja_JP.utf8
 COPY Gemfile Gemfile.lock /app/
 RUN bundle install
-CMD bundle exec pry
+CMD /bin/bash
