@@ -65,6 +65,7 @@ class Client
     if @bot_objective_word_registered && word == @current_target
       word = @dic.next_word(start: @current_word, goal: @dic.detect_target(ignore: @current_word))
     end
+    @dic.remove_word(word: @current_word)
     param = "play_id=#{@play_id}&word=#{word}"
     @logger.info "post /shiritori with param: #{param}"
     response = JSON.parse(@client.post('/shiritori', param).body, symbolize_names: true)
