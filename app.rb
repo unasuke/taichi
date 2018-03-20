@@ -122,6 +122,7 @@ class Dictionary
 
   def initialize(file: nil)
     raise ArgumentError, '辞書を指定してください' unless file
+    @file = file
     @data = CSV.read(file, headers: true, encoding: 'UTF-8')
     @poem_id = nil
     @poems = CSV.read(POEMS_DATA, headers: true, encoding: 'UTF-8')
@@ -133,7 +134,9 @@ class Dictionary
     @neo4j = Neography::Rest.new
     @logger = Logger.new(STDOUT)
     @logger.level = Logger::DEBUG
+    @bulk = (@data.size > 40000)
     build_index
+    @logger.debug 'finish dictionary initialize'
   end
 
   def poem
@@ -143,6 +146,7 @@ class Dictionary
   end
 
   def register_to_db(poem_id: nil)
+    @logger.debug 'start register_to_db'
     @neo4j.execute_query('MATCH (n) OPTIONAL MATCH (n)-[r]-() DELETE n,r')
     @poem_id = poem_id
     @data.each do |word|
@@ -150,6 +154,11 @@ class Dictionary
       h['node'] = register_word_to_db(word)
       @head[word['phonetic'][0]] << h
       @tail[word['phonetic'][-1]] << h
+    end unless @bulk
+    @logger.debug 'create @head and @tail'
+
+    if @bulk
+      @neo4j.execute_query("LOAD CSV WITH HEADERS FROM \"file:///#{@file}\" As line WITH like RETURN line;"
     end
 
     if @poem_id
@@ -177,8 +186,8 @@ class Dictionary
     return unless @tail[word['phonetic'][0]]
     @tail[word['phonetic'][0]].each do |target|
       target['node'].outgoing(:shiritori) << word['node']
-      #@logger.debug "set relationship #{target['word']} -> #{word['word']}"
-    end
+      @logger.debug "set relationship #{target['word']} -> #{word['word']}"
+    end unless @bulk
   end
 
   def register_word_to_db(word)

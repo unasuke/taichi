@@ -1,12 +1,16 @@
 version: '3'
 services:
   neo4j:
-    image: neo4j:3.3.3
+    build:
+      dockerfile: neo4j/Dockerfile
+      context: .
     environment:
       NEO4J_AUTH: none
     ports:
       - '7474:7474'
       - '7687:7687'
+    volumes:
+      - .:/app
   app:
     build: .
     volumes:
